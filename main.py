@@ -34,6 +34,9 @@ model = YOLO(MODEL_PATH)
 OUTPUT_DIR = "outputs"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the Mango Quality Checker API!"}
 
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...)):
