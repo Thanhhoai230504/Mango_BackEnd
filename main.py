@@ -19,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 # ✅ Link Google Drive (chia sẻ công khai)
-DRIVE_URL = "https://drive.google.com/uc?id=1XW8QilSox3Q1g4f_1rKxUOg1g3vYPq82"  # đổi thành ID của bạn
+DRIVE_URL = "https://drive.google.com/uc?id=1Huahb05L3-NGbFVIJGI_gBkqhBgOSirv"
 MODEL_PATH = "best.pt"
 
 # ✅ Tải model nếu chưa tồn tại
