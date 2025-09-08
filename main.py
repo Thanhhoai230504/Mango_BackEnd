@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import uuid
 import os
+import gdown 
 
 app = FastAPI(title="Mango Quality Checker API")
 
@@ -17,9 +18,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# ✅ Link Google Drive (chia sẻ công khai)
+DRIVE_URL = "https://drive.google.com/uc?id=1XW8QilSox3Q1g4f_1rKxUOg1g3vYPq82"  # đổi thành ID của bạn
+MODEL_PATH = "best.pt"
+
+# ✅ Tải model nếu chưa tồn tại
+if not os.path.exists(MODEL_PATH):
+    print("📥 Đang tải model từ Google Drive...")
+    gdown.download(DRIVE_URL, MODEL_PATH, quiet=False)
 
 # Load YOLO model
-model = YOLO("best.pt")
+model = YOLO(MODEL_PATH)
 
 # Thư mục lưu ảnh kết quả
 OUTPUT_DIR = "outputs"
