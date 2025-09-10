@@ -23,9 +23,12 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 
-# Torch (CPU only)
-torch==2.3.1
-torchvision==0.18.1
+# Torch (CPU only) - dùng wheel chính thức cho CPU để nhẹ hơn
+torch==2.2.2+cpu
+torchvision==0.17.2+cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# YOLO
 ultralytics==8.3.3
 
 # Image processing
@@ -38,4 +41,5 @@ gdown==5.2.0
 
 # HTTP request
 requests==2.32.3
+
 
