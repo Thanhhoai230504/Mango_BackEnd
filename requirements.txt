@@ -18,22 +18,24 @@
 
 
 
+# FastAPI & server
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 
-# YOLO + Torch (CPU only)
+# Torch (CPU only)
 torch==2.3.1
 torchvision==0.18.1
 ultralytics==8.3.3
 
-# Xử lý ảnh
+# Image processing
 opencv-python-headless==4.10.0.84
 Pillow==10.4.0
 numpy==1.26.4
 
-# Google Drive download
+# Download from Google Drive
 gdown==5.2.0
 
 # HTTP request
 requests==2.32.3
+
