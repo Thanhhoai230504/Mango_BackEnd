@@ -1,45 +1,22 @@
-# fastapi==0.115.0
-# uvicorn[standard]==0.30.6
-# python-multipart==0.0.9
-
-# # YOLO model
-# ultralytics==8.3.3
-
-# # Xử lý ảnh
-# opencv-python-headless==4.10.0.84
-# Pillow==10.4.0
-# numpy==1.26.4
-
-# # Google Drive download
-# gdown==5.2.0
-
-# # HTTP request
-# requests==2.32.3
-
-
-
-# FastAPI & server
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
 
-# Torch (CPU only) - dùng wheel chính thức cho CPU để nhẹ hơn
-torch==2.2.2+cpu
-torchvision==0.17.2+cpu
---extra-index-url https://download.pytorch.org/whl/cpu
-
-# YOLO
+# YOLO model
 ultralytics==8.3.3
 
-# Image processing
+# Xử lý ảnh
 opencv-python-headless==4.10.0.84
 Pillow==10.4.0
 numpy==1.26.4
 
-# Download from Google Drive
+# Google Drive download
 gdown==5.2.0
 
 # HTTP request
 requests==2.32.3
+
+
+
 
 
