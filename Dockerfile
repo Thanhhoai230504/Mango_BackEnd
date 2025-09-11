@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.9-slim
 
 # Install system dependencies for OpenCV
 RUN apt-get update && apt-get install -y \
@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender-dev \
     libgomp1 \
+    libglib2.0-0 \
     libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -14,9 +15,7 @@ WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
-RUN pip install --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir -r requirements.txt \
-    && rm -rf /root/.cache/pip
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY main.py main.py
