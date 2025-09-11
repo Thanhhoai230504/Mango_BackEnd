@@ -19,7 +19,7 @@ RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY optimized_main.py main.py
+COPY main.py main.py
 
 # Create outputs directory
 RUN mkdir -p outputs
