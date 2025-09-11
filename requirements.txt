@@ -1,33 +1,20 @@
-# fastapi==0.115.0
-# uvicorn[standard]==0.30.6
-# python-multipart==0.0.9
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
 
-# # YOLO model
-# ultralytics==8.3.3
+# YOLO model
+ultralytics==8.3.3
 
-# # Xử lý ảnh
-# opencv-python-headless==4.10.0.84
-# Pillow==10.4.0
-# numpy==1.26.4
+# Xử lý ảnh
+opencv-python-headless==4.10.0.84
+Pillow==10.4.0
+numpy==1.26.4
 
-# # Google Drive download
-# gdown==5.2.0
+# Google Drive download
+gdown==5.2.0
 
-# # HTTP request
-# requests==2.32.3
-
-########################
-
-
-setuptools>=65.0.0
-wheel
-
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
-ultralytics==8.0.196
-opencv-python==4.8.1.78
-numpy==1.24.3
-gdown==4.7.1
+# HTTP request
+requests==2.32.3
 python-dotenv==1.0.0
+########################
 
