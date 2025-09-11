@@ -316,6 +316,9 @@
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
+############################################
+
+
 
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
@@ -328,117 +331,155 @@ import uuid
 import os
 import gdown
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
 import logging
-from typing import List, Dict, Any
+from contextlib import asynccontextmanager
 import time
-from PIL import Image
-import io
 
-# ✅ Cấu hình logging
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global variables
+model = None
+model_loaded = False
+executor = ThreadPoolExecutor(max_workers=2)
+
+# Configuration
+DRIVE_URL = "https://drive.google.com/uc?id=1Huahb05L3-NGbFVIJGI_gBkqhBgOSirv"
+MODEL_PATH = "best.pt"
+OUTPUT_DIR = "outputs"
+MAX_IMAGE_SIZE = (800, 600)  # Reduced size for faster processing
+CLEANUP_INTERVAL = 3600  # Clean up files every hour
+
+async def load_model():
+    """Load YOLO model asynchronously"""
+    global model, model_loaded
+    
+    try:
+        logger.info("Starting model loading...")
+        
+        # Download model if not exists
+        if not os.path.exists(MODEL_PATH):
+            logger.info("📥 Downloading model from Google Drive...")
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                executor, 
+                gdown.download, 
+                DRIVE_URL, 
+                MODEL_PATH, 
+                False
+            )
+            logger.info("✅ Model downloaded successfully")
+        
+        # Load model in thread pool to avoid blocking
+        logger.info("🔄 Loading YOLO model...")
+        loop = asyncio.get_event_loop()
+        model = await loop.run_in_executor(executor, YOLO, MODEL_PATH)
+        
+        # Warm up model with dummy prediction
+        logger.info("🔥 Warming up model...")
+        dummy_img = np.zeros((480, 640, 3), dtype=np.uint8)
+        await loop.run_in_executor(executor, model.predict, dummy_img, 0.5)
+        
+        model_loaded = True
+        logger.info("✅ Model loaded and warmed up successfully!")
+        
+    except Exception as e:
+        logger.error(f"❌ Error loading model: {str(e)}")
+        model_loaded = False
+
+def cleanup_old_files():
+    """Clean up old generated files"""
+    try:
+        if os.path.exists(OUTPUT_DIR):
+            now = time.time()
+            for filename in os.listdir(OUTPUT_DIR):
+                file_path = os.path.join(OUTPUT_DIR, filename)
+                if os.path.isfile(file_path):
+                    # Delete files older than 1 hour
+                    if now - os.path.getctime(file_path) > 3600:
+                        os.remove(file_path)
+                        logger.info(f"Cleaned up old file: {filename}")
+    except Exception as e:
+        logger.error(f"Error during cleanup: {str(e)}")
+
+async def periodic_cleanup():
+    """Run cleanup periodically"""
+    while True:
+        await asyncio.sleep(CLEANUP_INTERVAL)
+        cleanup_old_files()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("🚀 Starting FastAPI application...")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    # Start model loading in background
+    asyncio.create_task(load_model())
+    
+    # Start periodic cleanup
+    asyncio.create_task(periodic_cleanup())
+    
+    yield
+    
+    # Shutdown
+    logger.info("⏹️ Shutting down application...")
+    executor.shutdown(wait=True)
+
 app = FastAPI(
-    title="Mango Quality Checker API",
-    description="Fast AI-powered mango quality detection",
-    version="2.0.0"
+    title="Optimized Mango Quality Checker API",
+    description="Fast ML-powered mango quality detection",
+    version="2.0.0",
+    lifespan=lifespan
 )
 
-# ✅ Bật CORS cho frontend
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ Cấu hình model
-DRIVE_URL = "https://drive.google.com/uc?id=1Huahb05L3-NGbFVIJGI_gBkqhBgOSirv"
-MODEL_PATH = "best.pt"
-OUTPUT_DIR = "outputs"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-# ✅ Thread pool cho xử lý song song
-executor = ThreadPoolExecutor(max_workers=2)
-
-# ✅ Global model instance
-model = None
-
-async def load_model():
-    """Load model asynchronously"""
-    global model
-    if model is None:
-        logger.info("🔄 Loading YOLO model...")
-        start_time = time.time()
-        
-        # Tải model nếu chưa tồn tại
-        if not os.path.exists(MODEL_PATH):
-            logger.info("📥 Downloading model from Google Drive...")
-            gdown.download(DRIVE_URL, MODEL_PATH, quiet=False)
-        
-        # Load model trong thread pool để không block
-        loop = asyncio.get_event_loop()
-        model = await loop.run_in_executor(executor, YOLO, MODEL_PATH)
-        
-        load_time = time.time() - start_time
-        logger.info(f"✅ Model loaded in {load_time:.2f}s")
+def resize_image(image: np.ndarray, max_size: tuple = MAX_IMAGE_SIZE) -> np.ndarray:
+    """Resize image while maintaining aspect ratio"""
+    height, width = image.shape[:2]
+    max_width, max_height = max_size
     
-    return model
-
-@app.on_event("startup")
-async def startup_event():
-    """Preload model on startup"""
-    await load_model()
-    logger.info("🚀 API ready!")
-
-@app.get("/")
-async def root():
-    return {
-        "message": "Welcome to the Mango Quality Checker API!",
-        "status": "ready",
-        "model_loaded": model is not None
-    }
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "model_ready": model is not None,
-        "timestamp": time.time()
-    }
-
-def process_image_sync(img_array: np.ndarray, conf_threshold: float = 0.5) -> tuple:
-    """Synchronous image processing function"""
-    global model
+    # Calculate scaling factor
+    scale = min(max_width / width, max_height / height)
     
-    # Resize ảnh nếu quá lớn để tăng tốc
-    height, width = img_array.shape[:2]
-    max_size = 1024
-    
-    if max(height, width) > max_size:
-        scale = max_size / max(height, width)
+    if scale < 1:
         new_width = int(width * scale)
         new_height = int(height * scale)
-        img_array = cv2.resize(img_array, (new_width, new_height), interpolation=cv2.INTER_AREA)
-        logger.info(f"📏 Resized image: {width}x{height} -> {new_width}x{new_height}")
+        return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
     
-    # Chạy dự đoán
-    results = model.predict(img_array, conf=conf_threshold, verbose=False)
-    
-    boxes = results[0].boxes
-    annotated_img = img_array.copy()
-    response_data = []
+    return image
 
-    if boxes is not None and len(boxes) > 0:
-        for i, box in enumerate(boxes):
+def process_image_sync(img: np.ndarray) -> tuple:
+    """Process image synchronously in thread pool"""
+    try:
+        # Resize for faster processing
+        img_resized = resize_image(img)
+        
+        # Run prediction
+        results = model.predict(img_resized, conf=0.5, verbose=False)
+        boxes = results[0].boxes
+        
+        # Create annotated image
+        annotated_img = img_resized.copy()
+        response_data = []
+
+        for box in boxes:
             cls_id = int(box.cls[0].item())
             conf = float(box.conf[0].item())
             raw_label = model.names[cls_id]
 
-            # Chuẩn hóa nhãn
+            # Normalize labels
             if "fresh" in raw_label.lower():
                 label = "fresh"
                 color = (0, 255, 0)
@@ -450,148 +491,138 @@ def process_image_sync(img_array: np.ndarray, conf_threshold: float = 0.5) -> tu
                 emoji = "❌🟤"
                 message = "Ui, xoài hỏng rồi"
 
-            # Vẽ khung + text
+            # Draw bounding box and text
             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-            
-            # Vẽ khung dày hơn và rõ hơn
-            cv2.rectangle(annotated_img, (x1, y1), (x2, y2), color, 4)
-            
-            # Vẽ background cho text
-            text = f"{label} {conf:.2f}"
-            (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-            cv2.rectangle(annotated_img, (x1, y1 - text_height - 10), (x1 + text_width, y1), color, -1)
-            
-            # Vẽ text
+            cv2.rectangle(annotated_img, (x1, y1), (x2, y2), color, 3)
             cv2.putText(
                 annotated_img,
-                text,
-                (x1, y1 - 5),
+                f"{label} {conf:.2f} {emoji}",
+                (x1, y1 - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.8,
-                (255, 255, 255),  # Text màu trắng
+                color,
                 2
             )
 
             response_data.append({
-                "id": i + 1,
                 "label": label,
                 "confidence": round(conf * 100, 2),
                 "emoji": emoji,
-                "message": message,
-                "bbox": [x1, y1, x2, y2]
+                "message": message
             })
-    
-    return annotated_img, response_data
+
+        return annotated_img, response_data
+        
+    except Exception as e:
+        logger.error(f"Error in image processing: {str(e)}")
+        raise e
+
+@app.get("/")
+async def root():
+    """Health check endpoint"""
+    return {
+        "message": "Optimized Mango Quality Checker API is running!",
+        "model_loaded": model_loaded,
+        "version": "2.0.0"
+    }
+
+@app.get("/health")
+async def health_check():
+    """Detailed health check"""
+    return {
+        "status": "healthy" if model_loaded else "loading",
+        "model_loaded": model_loaded,
+        "timestamp": time.time()
+    }
 
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...)):
-    """Fast prediction endpoint with optimizations"""
-    start_time = time.time()
+    """Predict mango quality from uploaded image"""
+    
+    # Check if model is loaded
+    if not model_loaded:
+        raise HTTPException(
+            status_code=503, 
+            detail="Model is still loading. Please wait a moment and try again."
+        )
+    
+    # Validate file
+    if not file.content_type.startswith('image/'):
+        raise HTTPException(status_code=400, detail="File must be an image")
     
     try:
-        # Validate file
-        if not file.content_type.startswith('image/'):
-            raise HTTPException(status_code=400, detail="File must be an image")
-        
-        # Ensure model is loaded
-        current_model = await load_model()
-        if current_model is None:
-            raise HTTPException(status_code=503, detail="Model not ready")
-        
-        # Đọc ảnh
+        # Read and decode image
+        logger.info(f"Processing image: {file.filename}")
         contents = await file.read()
-        read_time = time.time()
-        logger.info(f"📖 File read in {read_time - start_time:.3f}s")
         
-        # Decode ảnh
+        if len(contents) == 0:
+            raise HTTPException(status_code=400, detail="Empty file uploaded")
+        
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if img is None:
-            raise HTTPException(status_code=400, detail="Invalid image format")
+            raise HTTPException(status_code=400, detail="Could not decode image")
         
-        decode_time = time.time()
-        logger.info(f"🖼️ Image decoded in {decode_time - read_time:.3f}s")
-        
-        # Xử lý ảnh trong thread pool
+        # Process image in thread pool
         loop = asyncio.get_event_loop()
         annotated_img, response_data = await loop.run_in_executor(
-            executor, 
-            process_image_sync, 
-            img, 
-            0.5
+            executor,
+            process_image_sync,
+            img
         )
         
-        process_time = time.time()
-        logger.info(f"🤖 AI processing in {process_time - decode_time:.3f}s")
-        
-        # Lưu ảnh với chất lượng tối ưu
+        # Save annotated image
         output_filename = f"{uuid.uuid4().hex}.jpg"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
         
-        # Sử dụng compression để giảm kích thước file
-        cv2.imwrite(output_path, annotated_img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        # Save in thread pool to avoid blocking
+        await loop.run_in_executor(
+            executor,
+            cv2.imwrite,
+            output_path,
+            annotated_img
+        )
         
-        save_time = time.time()
-        logger.info(f"💾 Image saved in {save_time - process_time:.3f}s")
-        
-        total_time = save_time - start_time
-        logger.info(f"⚡ Total processing time: {total_time:.3f}s")
+        logger.info(f"Successfully processed image with {len(response_data)} detections")
         
         return {
-            "success": True,
             "results": response_data,
             "image_url": f"/download/{output_filename}",
-            "processing_time": round(total_time, 3),
-            "total_detections": len(response_data),
-            "image_size": f"{img.shape[1]}x{img.shape[0]}"
+            "processing_time": "optimized"
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ Error in prediction: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
+        logger.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
-    """Optimized file download with caching headers"""
+    """Download processed image"""
+    # Sanitize filename to prevent directory traversal
+    filename = os.path.basename(filename)
     file_path = os.path.join(OUTPUT_DIR, filename)
     
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    if os.path.exists(file_path):
+        return FileResponse(
+            file_path, 
+            media_type="image/jpeg", 
+            filename=filename,
+            headers={"Cache-Control": "max-age=3600"}  # Cache for 1 hour
+        )
     
-    return FileResponse(
-        file_path, 
-        media_type="image/jpeg", 
-        filename=filename,
-        headers={
-            "Cache-Control": "public, max-age=3600",  # Cache 1 hour
-            "ETag": filename
-        }
-    )
+    raise HTTPException(status_code=404, detail="File not found")
 
-# ✅ Background task để dọn dẹp file cũ
-@app.on_event("startup")
-async def cleanup_old_files():
-    """Clean up old files periodically"""
-    async def cleanup():
-        while True:
-            try:
-                current_time = time.time()
-                for filename in os.listdir(OUTPUT_DIR):
-                    file_path = os.path.join(OUTPUT_DIR, filename)
-                    if os.path.isfile(file_path):
-                        file_age = current_time - os.path.getctime(file_path)
-                        # Xóa file cũ hơn 1 giờ
-                        if file_age > 3600:
-                            os.remove(file_path)
-                            logger.info(f"🗑️ Cleaned up old file: {filename}")
-            except Exception as e:
-                logger.error(f"Error in cleanup: {e}")
-            
-            # Chạy cleanup mỗi 30 phút
-            await asyncio.sleep(1800)
-    
-    asyncio.create_task(cleanup())
+@app.delete("/cleanup")
+async def manual_cleanup():
+    """Manual cleanup endpoint for old files"""
+    try:
+        cleanup_old_files()
+        return {"message": "Cleanup completed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
@@ -599,7 +630,6 @@ if __name__ == "__main__":
         "main:app", 
         host="0.0.0.0", 
         port=8000, 
-        reload=False,  # Tắt reload trong production
-        workers=1,     # Single worker cho model consistency
-        log_level="info"
+        reload=False,  # Disable reload in production
+        access_log=False  # Disable access logs for better performance
     )
