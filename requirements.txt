@@ -20,7 +20,13 @@
 
 
 
+# Công cụ build để tránh lỗi
+pip>=24.2
+setuptools>=75.1.0
+wheel
+build
 
+# Các thư viện dự án
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
@@ -29,4 +35,3 @@ opencv-python==4.8.1.78
 numpy==1.24.3
 gdown==4.7.1
 python-dotenv==1.0.0
-
