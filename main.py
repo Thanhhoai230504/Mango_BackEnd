@@ -632,7 +632,7 @@
 
 
 ######################################
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
@@ -645,10 +645,10 @@ import asyncio
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import logging
-from contextlib import asynccontextmanager
 import time
 import gc
 import psutil
+from contextlib import asynccontextmanager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -657,69 +657,56 @@ logger = logging.getLogger(__name__)
 # Global variables
 model = None
 model_loaded = False
-executor = ThreadPoolExecutor(max_workers=1)  # Reduced for Railway
+executor = ThreadPoolExecutor(max_workers=1)
 
-# Configuration optimized for Railway
+# Configuration for Railway
 DRIVE_URL = "https://drive.google.com/uc?id=1Huahb05L3-NGbFVIJGI_gBkqhBgOSirv"
 MODEL_PATH = "best.pt"
 OUTPUT_DIR = "outputs"
-MAX_IMAGE_SIZE = (640, 480)  # Smaller for Railway
-CLEANUP_INTERVAL = 1800  # Clean up every 30 minutes
-MAX_FILES = 10  # Keep only 10 recent files
+MAX_IMAGE_SIZE = (640, 480)
+MAX_FILES = 5
 
 def get_memory_usage():
     """Get current memory usage"""
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / 1024 / 1024  # MB
+    try:
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024  # MB
+    except:
+        return 0
 
 async def load_model():
-    """Load YOLO model with memory optimization"""
+    """Load YOLO model with optimization"""
     global model, model_loaded
     
     try:
-        logger.info(f"Starting model loading... Memory: {get_memory_usage():.1f}MB")
+        logger.info("🚀 Starting model loading...")
         
         # Download model if not exists
         if not os.path.exists(MODEL_PATH):
-            logger.info("📥 Downloading model from Google Drive...")
+            logger.info("📥 Downloading model...")
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                executor, 
-                gdown.download, 
-                DRIVE_URL, 
-                MODEL_PATH, 
-                False
-            )
-            logger.info("✅ Model downloaded successfully")
+            await loop.run_in_executor(executor, gdown.download, DRIVE_URL, MODEL_PATH, False)
+            logger.info("✅ Model downloaded")
         
-        # Load model with memory optimization
+        # Load model
         logger.info("🔄 Loading YOLO model...")
         loop = asyncio.get_event_loop()
+        model = await loop.run_in_executor(executor, YOLO, MODEL_PATH)
         
-        def load_yolo():
-            # Force garbage collection before loading
-            gc.collect()
-            return YOLO(MODEL_PATH)
-        
-        model = await loop.run_in_executor(executor, load_yolo)
-        
-        # Warm up with smaller dummy image
-        logger.info("🔥 Warming up model...")
+        # Warm up
+        logger.info("🔥 Warming up...")
         dummy_img = np.zeros((320, 320, 3), dtype=np.uint8)
         await loop.run_in_executor(executor, model.predict, dummy_img, 0.5)
         
-        # Force garbage collection after warmup
-        gc.collect()
-        
         model_loaded = True
-        logger.info(f"✅ Model loaded successfully! Memory: {get_memory_usage():.1f}MB")
+        logger.info("✅ Model ready!")
         
     except Exception as e:
-        logger.error(f"❌ Error loading model: {str(e)}")
+        logger.error(f"❌ Model loading failed: {str(e)}")
         model_loaded = False
 
-def cleanup_old_files():
-    """Clean up old files with size limit"""
+def cleanup_files():
+    """Clean up old files"""
     try:
         if os.path.exists(OUTPUT_DIR):
             files = []
@@ -728,55 +715,34 @@ def cleanup_old_files():
                 if os.path.isfile(file_path):
                     files.append((file_path, os.path.getctime(file_path)))
             
-            # Sort by creation time (newest first)
+            # Keep only recent files
             files.sort(key=lambda x: x[1], reverse=True)
-            
-            # Keep only MAX_FILES recent files
             for file_path, _ in files[MAX_FILES:]:
                 try:
                     os.remove(file_path)
-                    logger.info(f"Cleaned up old file: {os.path.basename(file_path)}")
-                except Exception as e:
-                    logger.error(f"Error removing file {file_path}: {e}")
-            
-            # Force garbage collection after cleanup
-            gc.collect()
-            
+                    logger.info(f"Cleaned: {os.path.basename(file_path)}")
+                except:
+                    pass
     except Exception as e:
-        logger.error(f"Error during cleanup: {str(e)}")
-
-async def periodic_cleanup():
-    """Run cleanup periodically"""
-    while True:
-        await asyncio.sleep(CLEANUP_INTERVAL)
-        cleanup_old_files()
+        logger.error(f"Cleanup error: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("🚀 Starting Railway FastAPI application...")
+    logger.info("🚀 Starting Railway app...")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    # Start model loading in background
     asyncio.create_task(load_model())
-    
-    # Start periodic cleanup
-    asyncio.create_task(periodic_cleanup())
-    
     yield
-    
     # Shutdown
-    logger.info("⏹️ Shutting down application...")
     executor.shutdown(wait=True)
 
 app = FastAPI(
-    title="Railway Mango Quality Checker API",
-    description="Optimized ML-powered mango quality detection for Railway",
-    version="2.1.0",
+    title="Railway Mango Checker",
+    version="1.0.0",
     lifespan=lifespan
 )
 
-# CORS Configuration
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -785,35 +751,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-def resize_image(image: np.ndarray, max_size: tuple = MAX_IMAGE_SIZE) -> np.ndarray:
-    """Resize image while maintaining aspect ratio"""
+def resize_image(image: np.ndarray) -> np.ndarray:
+    """Resize image"""
     height, width = image.shape[:2]
-    max_width, max_height = max_size
+    max_width, max_height = MAX_IMAGE_SIZE
     
-    # Calculate scaling factor
     scale = min(max_width / width, max_height / height)
-    
     if scale < 1:
         new_width = int(width * scale)
         new_height = int(height * scale)
         return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
-    
     return image
 
 def process_image_sync(img: np.ndarray) -> tuple:
-    """Process image synchronously with memory optimization"""
+    """Process image"""
     try:
-        # Force garbage collection before processing
         gc.collect()
-        
-        # Resize for faster processing and less memory usage
         img_resized = resize_image(img)
         
-        # Run prediction with lower confidence for faster processing
+        # Run prediction
         results = model.predict(img_resized, conf=0.4, verbose=False, imgsz=320)
         boxes = results[0].boxes
         
-        # Create annotated image
         annotated_img = img_resized.copy()
         response_data = []
 
@@ -822,7 +781,6 @@ def process_image_sync(img: np.ndarray) -> tuple:
             conf = float(box.conf[0].item())
             raw_label = model.names[cls_id]
 
-            # Normalize labels
             if "fresh" in raw_label.lower():
                 label = "fresh"
                 color = (0, 255, 0)
@@ -834,18 +792,11 @@ def process_image_sync(img: np.ndarray) -> tuple:
                 emoji = "❌🟤"
                 message = "Ui, xoài hỏng rồi"
 
-            # Draw bounding box and text
+            # Draw box
             x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
             cv2.rectangle(annotated_img, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(
-                annotated_img,
-                f"{label} {conf:.2f}",
-                (x1, y1 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                color,
-                2
-            )
+            cv2.putText(annotated_img, f"{label} {conf:.2f}", (x1, y1 - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
             response_data.append({
                 "label": label,
@@ -854,174 +805,104 @@ def process_image_sync(img: np.ndarray) -> tuple:
                 "message": message
             })
 
-        # Force garbage collection after processing
         gc.collect()
-        
         return annotated_img, response_data
         
     except Exception as e:
-        logger.error(f"Error in image processing: {str(e)}")
+        logger.error(f"Processing error: {e}")
         raise e
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
-    memory_mb = get_memory_usage()
+    """Health check"""
     return {
-        "message": "Railway Mango Quality Checker API is running!",
+        "message": "Railway Mango Checker API",
         "model_loaded": model_loaded,
-        "version": "2.1.0",
-        "memory_usage_mb": round(memory_mb, 1),
-        "platform": "Railway"
+        "memory_mb": round(get_memory_usage(), 1)
     }
 
 @app.get("/health")
-async def health_check():
-    """Detailed health check"""
-    memory_mb = get_memory_usage()
+async def health():
+    """Detailed health"""
     return {
         "status": "healthy" if model_loaded else "loading",
         "model_loaded": model_loaded,
-        "memory_usage_mb": round(memory_mb, 1),
+        "memory_mb": round(get_memory_usage(), 1),
         "timestamp": time.time()
     }
 
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...)):
-    """Predict mango quality from uploaded image"""
+    """Predict mango quality"""
     
-    # Check if model is loaded
     if not model_loaded:
-        raise HTTPException(
-            status_code=503, 
-            detail="Model is still loading. Please wait a moment and try again."
-        )
+        raise HTTPException(status_code=503, detail="Model loading, please wait...")
     
-    # Validate file
     if not file.content_type.startswith('image/'):
-        raise HTTPException(status_code=400, detail="File must be an image")
-    
-    # Check file size (limit to 10MB for Railway)
-    if hasattr(file, 'size') and file.size > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large. Maximum 10MB allowed.")
+        raise HTTPException(status_code=400, detail="Must be image file")
     
     try:
-        # Read and decode image
-        logger.info(f"Processing image: {file.filename}")
+        logger.info(f"Processing: {file.filename}")
         contents = await file.read()
         
         if len(contents) == 0:
-            raise HTTPException(status_code=400, detail="Empty file uploaded")
+            raise HTTPException(status_code=400, detail="Empty file")
         
-        # Check memory before processing
-        memory_before = get_memory_usage()
-        logger.info(f"Memory before processing: {memory_before:.1f}MB")
-        
+        # Decode image
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
         if img is None:
-            raise HTTPException(status_code=400, detail="Could not decode image")
+            raise HTTPException(status_code=400, detail="Cannot decode image")
         
-        # Process image in thread pool
+        # Process
         loop = asyncio.get_event_loop()
         annotated_img, response_data = await loop.run_in_executor(
-            executor,
-            process_image_sync,
-            img
+            executor, process_image_sync, img
         )
         
-        # Save annotated image with compression
+        # Save result
         output_filename = f"{uuid.uuid4().hex}.jpg"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
         
-        # Save with compression to reduce file size
-        encode_params = [cv2.IMWRITE_JPEG_QUALITY, 85]
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, 80]
         await loop.run_in_executor(
-            executor,
-            cv2.imwrite,
-            output_path,
-            annotated_img,
-            encode_params
+            executor, cv2.imwrite, output_path, annotated_img, encode_params
         )
         
-        # Clean up memory
+        # Cleanup
         del img, annotated_img, nparr, contents
         gc.collect()
         
-        memory_after = get_memory_usage()
-        logger.info(f"Memory after processing: {memory_after:.1f}MB")
-        logger.info(f"Successfully processed image with {len(response_data)} detections")
+        # Clean old files
+        cleanup_files()
+        
+        logger.info(f"Success: {len(response_data)} detections")
         
         return {
             "results": response_data,
-            "image_url": f"/download/{output_filename}",
-            "processing_time": "optimized",
-            "memory_usage_mb": round(memory_after, 1)
+            "image_url": f"/download/{output_filename}"
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-        # Clean up memory on error
+        logger.error(f"Error: {e}")
         gc.collect()
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
-    """Download processed image"""
-    # Sanitize filename to prevent directory traversal
+    """Download result image"""
     filename = os.path.basename(filename)
     file_path = os.path.join(OUTPUT_DIR, filename)
     
     if os.path.exists(file_path):
-        return FileResponse(
-            file_path, 
-            media_type="image/jpeg", 
-            filename=filename,
-            headers={"Cache-Control": "max-age=1800"}  # Cache for 30 minutes
-        )
+        return FileResponse(file_path, media_type="image/jpeg", filename=filename)
     
     raise HTTPException(status_code=404, detail="File not found")
-
-@app.delete("/cleanup")
-async def manual_cleanup():
-    """Manual cleanup endpoint for old files"""
-    try:
-        cleanup_old_files()
-        memory_mb = get_memory_usage()
-        return {
-            "message": "Cleanup completed successfully",
-            "memory_usage_mb": round(memory_mb, 1)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cleanup failed: {str(e)}")
-
-@app.get("/stats")
-async def get_stats():
-    """Get system statistics"""
-    try:
-        memory_mb = get_memory_usage()
-        file_count = len(os.listdir(OUTPUT_DIR)) if os.path.exists(OUTPUT_DIR) else 0
-        
-        return {
-            "memory_usage_mb": round(memory_mb, 1),
-            "model_loaded": model_loaded,
-            "output_files": file_count,
-            "max_files": MAX_FILES,
-            "max_image_size": MAX_IMAGE_SIZE
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Stats error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(
-        "railway_main:app", 
-        host="0.0.0.0", 
-        port=port, 
-        reload=False,
-        access_log=False
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)

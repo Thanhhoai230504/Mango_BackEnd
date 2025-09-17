@@ -1,86 +1,49 @@
-# Railway Deployment Setup
+# 🚀 Railway Deployment Guide (Simplified)
 
-## 🚀 Quick Deploy Steps
+## Step 1: Prepare Files
+Upload these 2 files to Railway:
+- `main.py` (the simplified backend)
+- `requirements.txt` (minimal dependencies)
 
-### 1. Prepare Files
+## Step 2: Railway Settings
+**Build Command:** (leave empty - Railway auto-detects)
+**Start Command:** 
+```
+uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+```
 
-Upload these files to your Railway project:
+## Step 3: Environment Variables
+Railway automatically sets `PORT` - no need to add anything.
 
-- `main.py` → rename to `main.py`
-- `requirements.txt` → rename to `requirements.txt`
-- `Dockerfile` → rename to `Dockerfile`
+## Step 4: Deploy Process
+1. Connect your GitHub repo to Railway
+2. Railway will automatically build and deploy
+3. First build takes 5-10 minutes (downloading ML dependencies)
+4. Model download takes another 2-3 minutes on first run
 
-### 2. Railway Configuration
+## Step 5: Update Frontend
+Update your `.env` file:
+```
+VITE_API_BASE_URL=https://your-project-name.up.railway.app
+```
 
-**Build Settings:**
+## Expected Timeline:
+- **Build**: 5-10 minutes
+- **First Request**: 2-3 minutes (model download)
+- **Subsequent Requests**: 3-7 seconds
 
-- Build Command: `pip install -r requirements.txt`
-- Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`
+## Troubleshooting:
+1. **Build fails**: Check Build Logs tab
+2. **Memory issues**: Upgrade to Railway Pro ($5/month)
+3. **Timeout**: First request may take 3+ minutes
 
-**Environment Variables:**
+## Alternative: No Docker Approach
+If still having issues, try:
+1. Remove any Dockerfile
+2. Use only `main.py` and `requirements.txt`
+3. Let Railway use Nixpacks (automatic detection)
 
-- `PORT` (automatically set by Railway)
-- `PYTHONUNBUFFERED=1`
-- `PYTHONDONTWRITEBYTECODE=1`
-
-### 3. Resource Optimization
-
-**Memory Usage:**
-
-- Reduced image processing size to 640x480
-- Single worker process
-- Aggressive garbage collection
-- Limited file storage (10 files max)
-
-**Docker Optimization:**
-
-- Multi-stage build to reduce image size
-- Headless OpenCV (no GUI dependencies)
-- Minimal system dependencies
-- Clean package cache
-
-### 4. Expected Performance
-
-**First Deploy:**
-
-- Build time: 5-8 minutes
-- Model download: 2-3 minutes
-- Total cold start: ~10 minutes
-
-**Runtime:**
-
-- Warm requests: 3-7 seconds
-- Memory usage: ~800MB-1.2GB
-- Image size: ~2.5GB (vs 7.7GB before)
-
-### 5. Monitoring
-
-Check these endpoints after deployment:
-
-- `GET /` - Basic health check
-- `GET /health` - Detailed status with memory usage
-- `GET /stats` - System statistics
-
-### 6. Troubleshooting
-
-**If build still fails:**
-
-1. Try without Dockerfile first (use requirements.txt only)
-2. Check Railway logs for specific error
-3. Reduce dependencies further if needed
-
-**Memory issues:**
-
-- Railway free tier has 512MB RAM limit
-- Upgrade to Pro ($5/month) for 8GB RAM
-- Monitor `/stats` endpoint for memory usage
-
-### 7. Alternative: Nixpacks Build
-
-If Dockerfile fails, try Nixpacks (Railway's default):
-
-1. Remove Dockerfile
-2. Keep only `main.py` and `requirements.txt`
-3. Set start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-
-This will use Railway's automatic build detection.
+## Pro Tips:
+- Railway Pro gives 8GB RAM vs 512MB free
+- Pro also removes sleep mode
+- Very worth it for ML apps ($5/month)
