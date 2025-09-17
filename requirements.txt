@@ -24,6 +24,6 @@ uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 ultralytics==8.0.196
 opencv-python-headless==4.8.1.78
-numpy==1.24.3
+numpy==1.26.4
 gdown==4.7.1
 psutil==5.9.6
