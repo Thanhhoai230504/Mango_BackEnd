@@ -341,9 +341,8 @@ logger = logging.getLogger(__name__)
 model = None
 model_loaded = False
 executor = ThreadPoolExecutor(max_workers=2)
-
 # Configuration
-DRIVE_URL = "https://drive.google.com/uc?id=1Huahb05L3-NGbFVIJGI_gBkqhBgOSirv"
+DRIVE_URL = "https://drive.google.com/uc?id=1GN47lUF7RUZsjpNh7e0y2MHYlS0lq6SF"
 MODEL_PATH = "best.pt"
 OUTPUT_DIR = "outputs"
 MAX_IMAGE_SIZE = (800, 600)  # Reduced size for faster processing
