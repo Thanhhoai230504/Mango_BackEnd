@@ -18,8 +18,14 @@ import base64
 from typing import List, Dict
 import io
 from datetime import datetime
+import google.generativeai as genai
+from pydantic import BaseModel
+GEMINI_API_KEY = "AIzaSyCjJtRWnbs5owReG1-Im535iF8hBAnQYtM" 
+genai.configure(api_key=GEMINI_API_KEY)
 
 
+# ====== Load model ======
+chat_model = genai.GenerativeModel('models/gemini-2.0-flash-exp')
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,6 +44,21 @@ CLEANUP_INTERVAL = 3600
 FRAME_SKIP = 2  # Process every 2nd frame for video
 UPLOAD_DIR = "uploads"
 
+
+# ====== Schema ======
+class ChatMessage(BaseModel):
+    question: str
+
+# ====== Đọc file kiến thức ======
+def load_mango_knowledge():
+    path = "data/mango_knowledge.txt"
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    return "Không có dữ liệu mô tả về xoài."
+
+mango_knowledge = load_mango_knowledge()
+
 async def load_model():
     """Load YOLO model asynchronously"""
     global model, model_loaded
@@ -45,7 +66,7 @@ async def load_model():
         logger.info("Starting model loading...")
         
         if not os.path.exists(MODEL_PATH):
-            logger.info("📥 Downloading model from Google Drive...")
+            logger.info(" Downloading model from Google Drive...")
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(
                 executor,
@@ -54,20 +75,20 @@ async def load_model():
                 MODEL_PATH,
                 False
             )
-            logger.info("✅ Model downloaded successfully")
+            logger.info(" Model downloaded successfully")
 
-        logger.info("🔄 Loading YOLO model...")
+        logger.info(" Loading YOLO model...")
         loop = asyncio.get_event_loop()
         model = await loop.run_in_executor(executor, YOLO, MODEL_PATH)
 
-        logger.info("🔥 Warming up model...")
+        logger.info(" Warming up model...")
         dummy_img = np.zeros((480, 640, 3), dtype=np.uint8)
         await loop.run_in_executor(executor, model.predict, dummy_img, 0.5)
 
         model_loaded = True
-        logger.info("✅ Model loaded and warmed up successfully!")
+        logger.info(" Model loaded and warmed up successfully!")
     except Exception as e:
-        logger.error(f"❌ Error loading model: {str(e)}")
+        logger.error(f" Error loading model: {str(e)}")
         model_loaded = False
 
 def cleanup_old_files():
@@ -93,13 +114,13 @@ async def periodic_cleanup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    logger.info("🚀 Starting FastAPI application...")
+    logger.info(" Starting FastAPI application...")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     asyncio.create_task(load_model())
     asyncio.create_task(periodic_cleanup())
     yield
     # Shutdown
-    logger.info("⏹️ Shutting down application...")
+    logger.info(" Shutting down application...")
     executor.shutdown(wait=True)
 
 app = FastAPI(
@@ -149,12 +170,12 @@ def process_frame_sync(img: np.ndarray, conf_threshold: float = 0.5) -> Dict:
             if "fresh" in raw_label.lower():
                 label = "fresh"
                 color = (0, 255, 0)
-                emoji = "✅🍋"
+                emoji = "🍋"
                 message = "Xoài ngon rồi đấy"
             else:
                 label = "rotten"
                 color = (0, 0, 255)
-                emoji = "❌🟤"
+                emoji = "🟤"
                 message = "Ui, xoài hỏng rồi"
 
             # Lấy tọa độ bbox
@@ -172,7 +193,7 @@ def process_frame_sync(img: np.ndarray, conf_threshold: float = 0.5) -> Dict:
                 2
             )
 
-            # ✅ IMPORTANT: Ajouter bbox dans les détections
+            #  IMPORTANT: Ajouter bbox dans les détections
             detections.append({
                 "label": label,
                 "confidence": round(conf * 100, 2),
@@ -265,7 +286,7 @@ async def predict(file: UploadFile = File(...)):
         output_path = os.path.join(OUTPUT_DIR, output_filename)
         await loop.run_in_executor(executor, cv2.imwrite, output_path, annotated_img)
 
-        logger.info(f"✅ Processed {len(result['detections'])} detections successfully!")
+        logger.info(f" Processed {len(result['detections'])} detections successfully!")
 
         return {
             "results": result["detections"],
@@ -313,13 +334,13 @@ async def predict_frame(file: UploadFile = File(...)):
         _, buffer = cv2.imencode(".jpg", result["annotated_img"])
         frame_base64 = base64.b64encode(buffer).decode("utf-8")
 
-        # ✅ Lưu lại frame đã xử lý
+        #  Lưu lại frame đã xử lý
         output_filename = f"frame_{uuid.uuid4().hex}.jpg"
         output_path = os.path.join(OUTPUT_DIR, output_filename)
         await loop.run_in_executor(executor, cv2.imwrite, output_path, result["annotated_img"])
 
         # Trả về kết quả
-        logger.info(f"✅ Realtime frame processed with {len(result['detections'])} detections")
+        logger.info(f" Realtime frame processed with {len(result['detections'])} detections")
 
         return {
             "detections": result["detections"],
@@ -395,7 +416,7 @@ async def predict_video(file: UploadFile = File(...)):
 
         loop = asyncio.get_event_loop()
 
-        logger.info("🔄 Processing video frames...")
+        logger.info(" Processing video frames...")
 
         while True:
             ret, frame = cap.read()
@@ -458,7 +479,7 @@ async def predict_video(file: UploadFile = File(...)):
         if not os.path.exists(output_video_path) or os.path.getsize(output_video_path) == 0:
             raise HTTPException(status_code=500, detail="Failed to create output video")
 
-        logger.info(f"✅ Video processed: {processed_count} frames analyzed, {fresh_count} fresh, {rotten_count} rotten")
+        logger.info(f" Video processed: {processed_count} frames analyzed, {fresh_count} fresh, {rotten_count} rotten")
 
         # Structure de réponse compatible avec le frontend
         return {
@@ -520,3 +541,41 @@ if __name__ == "__main__":
         reload=False,
         access_log=False
     )
+
+    # ====== API Chatbot ======
+@app.post("/chat/")
+async def chat_with_bot(message: ChatMessage):
+    """
+    Chatbot về trái cây, trong đó xoài là chủ đề chuyên sâu nhất.
+    """
+    user_question = message.question.strip()
+    if not user_question:
+        raise HTTPException(status_code=400, detail="Câu hỏi không được để trống.")
+
+    prompt = f"""
+    Bạn là một chuyên gia về trái cây nhiệt đới, đặc biệt am hiểu về xoài.
+    Nhiệm vụ của bạn là trả lời các câu hỏi của người dùng liên quan đến:
+    - Xoài (các giống xoài, cách chọn xoài ngon, giá trị dinh dưỡng, cách bảo quản, lợi ích, nguồn gốc...)
+    - Các loại trái cây khác (chuối, cam, táo, dưa hấu, v.v.), với độ chi tiết vừa phải.
+
+    ---KIẾN THỨC THAM KHẢO VỀ XOÀI---
+    {mango_knowledge}
+    ----------------------------------
+
+    Hướng dẫn trả lời:
+    1. Nếu câu hỏi liên quan đến xoài → trả lời chi tiết, có ví dụ cụ thể, chính xác về giống, vùng trồng, dinh dưỡng, hoặc cách phân biệt.
+    2. Nếu câu hỏi về trái cây khác → trả lời ngắn gọn, dễ hiểu, nhưng vẫn đảm bảo đúng kiến thức.
+    3. Nếu người dùng hỏi chung (ví dụ: “trái cây nào tốt cho da?”) → so sánh nhẹ và ưu tiên nhắc đến xoài nếu phù hợp.
+    4. Nếu bạn không chắc chắn, hãy nói: “Mình chưa có đủ thông tin chính xác để trả lời phần này.”
+
+    Trả lời ngắn gọn, thân thiện, bằng tiếng Việt, như một người hướng dẫn nông sản.
+    -------------------
+    Câu hỏi: {user_question}
+    """
+
+    try:
+        response = chat_model.generate_content(prompt)
+        return {"answer": response.text}
+    except Exception as e:
+        print(f"Chatbot error: {e}")
+        raise HTTPException(status_code=500, detail="Lỗi khi truy vấn chatbot.")
