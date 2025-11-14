@@ -20,12 +20,12 @@ import io
 from datetime import datetime
 import google.generativeai as genai
 from pydantic import BaseModel
-GEMINI_API_KEY = "AIzaSyCjJtRWnbs5owReG1-Im535iF8hBAnQYtM" 
+GEMINI_API_KEY = "AIzaSyBKG3_rNmBwGKvBhgHazDptcPqg77dEWFk" 
 genai.configure(api_key=GEMINI_API_KEY)
 
 
 # ====== Load model ======
-chat_model = genai.GenerativeModel('models/gemini-2.0-flash-exp')
+chat_model = genai.GenerativeModel('gemini-2.5-flash')
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -49,6 +49,11 @@ UPLOAD_DIR = "uploads"
 class ChatMessage(BaseModel):
     question: str
 
+# ====== Schema cho Khuyến Nghị ======
+class RecommendationRequest(BaseModel):
+    fresh_count: int
+    rotten_count: int
+    
 # ====== Đọc file kiến thức ======
 def load_mango_knowledge():
     path = "data/mango_knowledge.txt"
@@ -150,7 +155,7 @@ def resize_image(image: np.ndarray, max_size: tuple = MAX_IMAGE_SIZE) -> np.ndar
         return cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
     return image
 
-
+##chạy model lấy bounding box
 def process_frame_sync(img: np.ndarray, conf_threshold: float = 0.5) -> Dict:
     """Process a single image and return detection results + annotated image"""
     try:
@@ -170,12 +175,10 @@ def process_frame_sync(img: np.ndarray, conf_threshold: float = 0.5) -> Dict:
             if "fresh" in raw_label.lower():
                 label = "fresh"
                 color = (0, 255, 0)
-                emoji = "🍋"
                 message = "Xoài ngon rồi đấy"
             else:
                 label = "rotten"
                 color = (0, 0, 255)
-                emoji = "🟤"
                 message = "Ui, xoài hỏng rồi"
 
             # Lấy tọa độ bbox
@@ -185,7 +188,7 @@ def process_frame_sync(img: np.ndarray, conf_threshold: float = 0.5) -> Dict:
             cv2.rectangle(annotated_img, (x1, y1), (x2, y2), color, 3)
             cv2.putText(
                 annotated_img,
-                f"{label} {conf:.2f} {emoji}",
+                f"{label} {conf:.2f}",
                 (x1, y1 - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.8,
@@ -197,7 +200,6 @@ def process_frame_sync(img: np.ndarray, conf_threshold: float = 0.5) -> Dict:
             detections.append({
                 "label": label,
                 "confidence": round(conf * 100, 2),
-                "emoji": emoji,
                 "message": message,
                 "bbox": [x1, y1, x2, y2]  # ← AJOUT DES COORDONNÉES
             })
@@ -210,7 +212,8 @@ def process_frame_sync(img: np.ndarray, conf_threshold: float = 0.5) -> Dict:
     except Exception as e:
         logger.error(f"Error processing frame: {str(e)}")
         raise e
-
+    
+##Vẽ bounding box lên ảnh
 def draw_detections(img: np.ndarray, detections: List[Dict]) -> np.ndarray:
     """Draw bounding boxes on image"""
     annotated_img = img.copy()
@@ -218,7 +221,6 @@ def draw_detections(img: np.ndarray, detections: List[Dict]) -> np.ndarray:
     for det in detections:
         label = det["label"]
         conf = det["confidence"]
-        emoji = det["emoji"]
         x1, y1, x2, y2 = det["bbox"]
         
         color = (0, 255, 0) if label == "fresh" else (0, 0, 255)
@@ -226,7 +228,7 @@ def draw_detections(img: np.ndarray, detections: List[Dict]) -> np.ndarray:
         cv2.rectangle(annotated_img, (x1, y1), (x2, y2), color, 3)
         cv2.putText(
             annotated_img,
-            f"{label} {conf:.1f}% {emoji}",
+            f"{label} {conf:.1f}% ",
             (x1, y1 - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
@@ -255,6 +257,7 @@ async def health_check():
         "timestamp": time.time()
     }
 
+###Dự đoán chất lượng xoài từ 1 ảnh
 @app.post("/predict/")
 async def predict(file: UploadFile = File(...)):
     """Predict mango quality from uploaded image"""
@@ -300,7 +303,7 @@ async def predict(file: UploadFile = File(...)):
         logger.error(f"Unexpected error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-
+##Dùng cho webcam / realtime từ frontend
 @app.post("/predict-frame/")
 async def predict_frame(file: UploadFile = File(...)):
     """Realtime prediction for a single frame (used for webcam stream)."""
@@ -579,3 +582,64 @@ async def chat_with_bot(message: ChatMessage):
     except Exception as e:
         print(f"Chatbot error: {e}")
         raise HTTPException(status_code=500, detail="Lỗi khi truy vấn chatbot.")
+
+
+
+@app.post("/get-recommendation/")
+async def get_recommendation(request: RecommendationRequest):
+    """
+    Tự động tạo khuyến nghị dựa trên kết quả phát hiện xoài
+    """
+    fresh = request.fresh_count
+    rotten = request.rotten_count
+    total = fresh + rotten
+
+    if total == 0:
+        return {"recommendation": "Không phát hiện được xoài nào để đưa ra khuyến nghị."}
+
+    prompt = f"""
+    Bạn là chuyên gia về xoài và chế biến thực phẩm.
+    
+    Kết quả phân tích:
+    - Tổng số xoài: {total} quả
+    - Xoài tươi ngon: {fresh} quả ({round(fresh/total*100, 1)}%)
+    - Xoài đã hỏng: {rotten} quả ({round(rotten/total*100, 1)}%)
+
+    ---KIẾN THỨC THAM KHẢO VỀ XOÀI---
+    {mango_knowledge}
+    ----------------------------------
+
+    Hãy đưa ra khuyến nghị CHI TIẾT và THỰC TÊ theo các trường hợp:
+
+    **Nếu chỉ có xoài tươi (rotten = 0):**
+    - Gợi ý 2-3 món ăn/đồ uống ngon từ xoài tươi (sinh tố, xoài lắc, salad, kem xoài...)
+    - Cách bảo quản để giữ tươi lâu
+    - Lợi ích dinh dưỡng
+
+    **Nếu có cả tươi và hỏng:**
+    - Xoài tươi: gợi ý món ăn
+    - Xoài hỏng: CẢNH BÁO không nên ăn, giải thích tại sao, và hướng dẫn cách xử lý (bỏ đi an toàn, không làm phân vì có thể chứa nấm bệnh)
+
+    **Nếu toàn bộ đều hỏng (fresh = 0):**
+    - Cảnh báo nghiêm túc về nguy cơ sức khỏe
+    - Khuyên KHÔNG sử dụng
+    - Hướng dẫn cách nhận biết xoài tươi lần sau
+
+    Trả lời bằng tiếng Việt, thân thiện nhưng CHÍNH XÁC về mặt an toàn thực phẩm.
+    Độ dài: 4-6 câu, súc tích, dễ hiểu.
+    """
+
+    try:
+        response = chat_model.generate_content(prompt)
+        return {"recommendation": response.text}
+    except Exception as e:
+        logger.error(f"Recommendation error: {e}")
+        # Fallback recommendation
+        if rotten == 0:
+            fallback = f"🎉 Bạn có {fresh} quả xoài tươi ngon! Có thể làm sinh tố xoài, xoài lắc muối ớt, hoặc ăn trực tiếp. Bảo quản trong ngăn mát tủ lạnh để giữ tươi lâu hơn."
+        elif fresh == 0:
+            fallback = f"⚠️ Cả {rotten} quả xoài đều đã hỏng. Không nên sử dụng vì có thể gây hại cho sức khỏe. Hãy chọn xoài có vỏ căng mịn, không có vết thâm đen lần sau nhé!"
+        else:
+            fallback = f"Bạn có {fresh} xoài tươi và {rotten} xoài hỏng. Sử dụng xoài tươi để chế biến món ăn, còn xoài hỏng nên loại bỏ để đảm bảo an toàn."
+        
+        return {"recommendation": fallback}
